@@ -1,0 +1,17 @@
+# Environment
+.env
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE
+.vscode/
+.idea/
+
+# Temp files
+temp_audio/
+temp_videos/
+
+# OS
+Thumbs.db
+.DS_Store
