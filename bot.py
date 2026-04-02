@@ -29,6 +29,7 @@ from database.connection import db
 from handlers.speaking import router as speaking_router
 from handlers.video_examiner import router as video_router
 from handlers.leaderboard import router as leaderboard_router
+from handlers.subscription import router as subscription_router
 
 # Logging sozlash
 logging.basicConfig(
@@ -136,6 +137,7 @@ async def on_shutdown():
 async def main():
     """Asosiy funksiya — botni ishga tushirish."""
     # Router'larni ro'yxatga olish
+    dp.include_router(subscription_router)  # Subscription — birinchi (photo handler)
     dp.include_router(speaking_router)
     dp.include_router(video_router)
     dp.include_router(leaderboard_router)

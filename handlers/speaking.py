@@ -39,12 +39,6 @@ os.makedirs(TEMP_AUDIO_DIR, exist_ok=True)
 async def handle_voice_message(message: Message):
     """
     Voice message handler — Foydalanuvchi ovozli xabar yuborganda ishga tushadi.
-
-    Qadam 1: Foydalanuvchini bazada ro'yxatga olish
-    Qadam 2: Audio faylni yuklab olish
-    Qadam 3: Whisper bilan transcribe qilish
-    Qadam 4: GPT-4 bilan tahlil qilish
-    Qadam 5: Natijani yuborish + bazaga saqlash
     """
     # Foydalanuvchini ro'yxatga olish
     user = await db.get_or_create_user(
@@ -52,6 +46,34 @@ async def handle_voice_message(message: Message):
         username=message.from_user.username,
         full_name=message.from_user.full_name,
     )
+
+    # ===== OBUNA TEKSHIRUVI =====
+    access = await db.check_user_access(message.from_user.id)
+
+    if not access["allowed"]:
+        await message.answer(
+            "⚠️ <b>Bepul limitingiz tugadi!</b>\n\n"
+            "Siz 3 ta bepul tahlildan foydalandingiz.\n\n"
+            "📦 <b>Premium obuna afzalliklari:</b>\n"
+            "  ✅ Cheksiz voice message tahlili\n"
+            "  ✅ GPT-4o bilan band score\n"
+            "  ✅ Vocabulary upgrades + Model answer\n\n"
+            "💳 Obuna olish uchun: /subscribe\n\n"
+            f"💰 Narxi: <b>60,000 so'm / oy</b>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    # Bepul urinishni kamaytirish (agar obunachi bo'lmasa)
+    if access["reason"] == "free":
+        await db.use_free_attempt(message.from_user.id)
+        free_left = access["free_left"] - 1
+        if free_left > 0:
+            free_note = f"\n💡 <i>Bepul urinishlar: {free_left} ta qoldi</i>"
+        else:
+            free_note = "\n💡 <i>Bu sizning oxirgi bepul urinishingiz!</i>"
+    else:
+        free_note = ""
 
     # Kutish xabari
     processing_msg = await message.answer(
@@ -75,12 +97,13 @@ async def handle_voice_message(message: Message):
         logger.info(f"📥 Audio yuklab olindi: {audio_path} ({voice.duration}s)")
 
         # 2. Whisper bilan transcribe qilish
-        transcript = await transcribe_voice(audio_path)
+        transcript, whisper_error = await transcribe_voice(audio_path)
 
         if not transcript:
+            error_detail = f"\n\n🔍 <i>Sabab: {whisper_error}</i>" if whisper_error else ""
             await processing_msg.edit_text(
                 "❌ <b>Audio'ni aniqlash mumkin emas.</b>\n\n"
-                "Iltimos, ingliz tilida gapirib qaytadan yuboring. 🎤",
+                f"Iltimos, ingliz tilida gapirib qaytadan yuboring. 🎤{error_detail}",
                 parse_mode=ParseMode.HTML,
             )
             return

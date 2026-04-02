@@ -143,6 +143,9 @@ class Database:
     ):
         """Vocabulary tavsiyalarni bazaga saqlash (batch insert)."""
         self._ensure_pool()
+
+        VALID_CATEGORIES = {'vocabulary', 'idiom', 'collocation', 'phrasal_verb'}
+
         async with self.pool.acquire() as conn:
             # Batch insert — loopdan tezroq
             await conn.executemany(
@@ -160,7 +163,7 @@ class Database:
                         s.get("suggested_word", ""),
                         s.get("context_sentence"),
                         str(s["score_impact"]) if s.get("score_impact") is not None else None,
-                        s.get("category", "vocabulary"),
+                        s.get("category", "vocabulary") if s.get("category") in VALID_CATEGORIES else "vocabulary",
                     )
                     for s in suggestions
                 ],
@@ -225,6 +228,142 @@ class Database:
                 telegram_id,
             )
             return rank
+
+    # --- Subscription metodlari ---
+
+    async def check_user_access(self, telegram_id: int) -> dict:
+        """
+        Foydalanuvchining botdan foydalanish huquqini tekshirish.
+
+        Returns:
+            dict: {"allowed": bool, "reason": str, "free_left": int}
+        """
+        self._ensure_pool()
+        async with self.pool.acquire() as conn:
+            user = await conn.fetchrow(
+                """
+                SELECT free_uses_left, is_subscribed, subscription_expires
+                FROM users WHERE telegram_id = $1
+                """,
+                telegram_id,
+            )
+            if not user:
+                return {"allowed": True, "reason": "new_user", "free_left": 3}
+
+            # Obuna faol
+            if user["is_subscribed"] and user["subscription_expires"]:
+                from datetime import datetime, timezone
+                if user["subscription_expires"] > datetime.now(timezone.utc):
+                    return {"allowed": True, "reason": "subscribed", "free_left": 0}
+                else:
+                    # Obuna muddati tugagan — o'chirish
+                    await conn.execute(
+                        "UPDATE users SET is_subscribed = FALSE WHERE telegram_id = $1",
+                        telegram_id,
+                    )
+
+            # Bepul urinishlar
+            if user["free_uses_left"] and user["free_uses_left"] > 0:
+                return {
+                    "allowed": True,
+                    "reason": "free",
+                    "free_left": user["free_uses_left"],
+                }
+
+            return {"allowed": False, "reason": "limit_reached", "free_left": 0}
+
+    async def use_free_attempt(self, telegram_id: int):
+        """Bepul urinishni 1 taga kamaytirish."""
+        self._ensure_pool()
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE users SET free_uses_left = GREATEST(free_uses_left - 1, 0)
+                WHERE telegram_id = $1
+                """,
+                telegram_id,
+            )
+
+    async def create_payment_request(
+        self, user_id: int, screenshot_file_id: str
+    ) -> int:
+        """To'lov so'rovini yaratish. Returns: subscription id."""
+        self._ensure_pool()
+        async with self.pool.acquire() as conn:
+            sub_id = await conn.fetchval(
+                """
+                INSERT INTO subscriptions (user_id, status, payment_screenshot)
+                VALUES ($1, 'pending', $2)
+                RETURNING id
+                """,
+                user_id,
+                screenshot_file_id,
+            )
+            return sub_id
+
+    async def approve_subscription(self, sub_id: int, admin_telegram_id: int):
+        """Admin to'lovni tasdiqlash — 30 kunlik obuna berish."""
+        self._ensure_pool()
+        async with self.pool.acquire() as conn:
+            # Subscription'ni yangilash
+            sub = await conn.fetchrow(
+                """
+                UPDATE subscriptions SET
+                    status = 'active',
+                    approved_by = $2,
+                    starts_at = NOW(),
+                    expires_at = NOW() + INTERVAL '30 days'
+                WHERE id = $1
+                RETURNING user_id, expires_at
+                """,
+                sub_id,
+                admin_telegram_id,
+            )
+            if sub:
+                # User'ni ham yangilash
+                await conn.execute(
+                    """
+                    UPDATE users SET
+                        is_subscribed = TRUE,
+                        subscription_expires = $2
+                    WHERE id = $1
+                    """,
+                    sub["user_id"],
+                    sub["expires_at"],
+                )
+            return sub
+
+    async def reject_subscription(self, sub_id: int):
+        """Admin to'lovni rad etish."""
+        self._ensure_pool()
+        async with self.pool.acquire() as conn:
+            sub = await conn.fetchrow(
+                """
+                UPDATE subscriptions SET status = 'rejected'
+                WHERE id = $1
+                RETURNING user_id
+                """,
+                sub_id,
+            )
+            return sub
+
+    async def get_user_id_by_internal(self, internal_id: int) -> int | None:
+        """Internal user ID dan telegram_id olish."""
+        self._ensure_pool()
+        async with self.pool.acquire() as conn:
+            return await conn.fetchval(
+                "SELECT telegram_id FROM users WHERE id = $1", internal_id
+            )
+
+    async def has_pending_payment(self, user_id: int) -> bool:
+        """Foydalanuvchining kutilayotgan to'lovi bormi?"""
+        self._ensure_pool()
+        async with self.pool.acquire() as conn:
+            count = await conn.fetchval(
+                "SELECT COUNT(*) FROM subscriptions WHERE user_id = $1 AND status = 'pending'",
+                user_id,
+            )
+            return count > 0
 
 
 # Global instance

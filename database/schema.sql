@@ -161,3 +161,39 @@ BEGIN
     UPDATE users SET weekly_xp = 0;
 END;
 $$ LANGUAGE plpgsql;
+
+
+-- 7. Foydalanuvchilarga obuna ustunlari
+-- (ALTER TABLE — mavjud jadvalga ustun qo'shish)
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name='users' AND column_name='free_uses_left') THEN
+        ALTER TABLE users ADD COLUMN free_uses_left INTEGER DEFAULT 3;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name='users' AND column_name='is_subscribed') THEN
+        ALTER TABLE users ADD COLUMN is_subscribed BOOLEAN DEFAULT FALSE;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_name='users' AND column_name='subscription_expires') THEN
+        ALTER TABLE users ADD COLUMN subscription_expires TIMESTAMPTZ;
+    END IF;
+END $$;
+
+
+-- 8. Obunalar jadvali (to'lovlar tarixi)
+CREATE TABLE IF NOT EXISTS subscriptions (
+    id                  SERIAL PRIMARY KEY,
+    user_id             INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    status              VARCHAR(20) DEFAULT 'pending'
+        CHECK (status IN ('pending', 'active', 'expired', 'rejected')),
+    payment_screenshot  TEXT,           -- Telegram photo file_id
+    approved_by         BIGINT,         -- Admin telegram_id
+    starts_at           TIMESTAMPTZ,
+    expires_at          TIMESTAMPTZ,
+    created_at          TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_sub_user ON subscriptions(user_id);
+CREATE INDEX IF NOT EXISTS idx_sub_status ON subscriptions(status);

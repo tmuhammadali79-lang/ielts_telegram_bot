@@ -40,10 +40,16 @@ async def analyze_transcript(transcript: str, question: str = None) -> dict:
             ],
             temperature=0.7,
             max_tokens=2000,
-            response_format={"type": "json_object"},
         )
 
-        result_text = response.choices[0].message.content
+        result_text = response.choices[0].message.content.strip()
+
+        # JSON ni ajratib olish (ba'zan GPT ```json ... ``` bilan o'rab yuboradi)
+        if result_text.startswith("```"):
+            # ```json ... ``` formatini tozalash
+            lines = result_text.split("\n")
+            result_text = "\n".join(lines[1:-1])
+
         result = json.loads(result_text)
 
         logger.info(
@@ -60,7 +66,7 @@ async def analyze_transcript(transcript: str, question: str = None) -> dict:
         return {"error": str(e)}
 
 
-async def transcribe_voice(audio_path: str) -> str:
+async def transcribe_voice(audio_path: str) -> tuple[str, str]:
     """
     Whisper API yordamida audio faylni matnga aylantirish.
 
@@ -68,7 +74,7 @@ async def transcribe_voice(audio_path: str) -> str:
         audio_path: Audio fayl yo'li (.ogg, .mp3, .wav)
 
     Returns:
-        str: Transkripsiya matni
+        tuple: (transcript, error) — muvaffaqiyatli bo'lsa error bo'sh string
     """
     try:
         with open(audio_path, "rb") as audio_file:
@@ -79,10 +85,10 @@ async def transcribe_voice(audio_path: str) -> str:
                 response_format="text",
             )
         logger.info(f"🎤 Transcription tayyor: {len(response)} belgi")
-        return response
+        return response, ""
     except Exception as e:
-        logger.error(f"❌ Whisper API xatosi: {e}")
-        return ""
+        logger.error(f"❌ Whisper API xatosi: {e}", exc_info=True)
+        return "", str(e)
 
 
 async def generate_feedback_script(analysis: dict) -> str:
