@@ -31,13 +31,17 @@ from handlers.video_examiner import router as video_router
 from handlers.leaderboard import router as leaderboard_router
 from handlers.subscription import router as subscription_router
 
-# Logging sozlash
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)-7s | %(name)-20s | %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    stream=sys.stdout,
+# Logging sozlash (Windows cp1251 encoding muammosini hal qilish)
+handler = logging.StreamHandler(
+    open(sys.stdout.fileno(), mode="w", encoding="utf-8", errors="replace", closefd=False)
 )
+handler.setFormatter(
+    logging.Formatter(
+        fmt="%(asctime)s | %(levelname)-7s | %(name)-20s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+)
+logging.basicConfig(level=logging.INFO, handlers=[handler])
 logger = logging.getLogger(__name__)
 
 # Bot va Dispatcher

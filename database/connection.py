@@ -365,6 +365,50 @@ class Database:
             )
             return count > 0
 
+    async def get_all_users(self) -> list[dict]:
+        """Barcha foydalanuvchilar ro'yxatini olish."""
+        self._ensure_pool()
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, telegram_id, username, full_name,
+                       total_xp, current_league, total_sessions,
+                       best_band_score, is_subscribed, free_uses_left,
+                       created_at
+                FROM users
+                ORDER BY created_at DESC
+                """
+            )
+            return [dict(r) for r in rows]
+
+    async def grant_unlimited(self, telegram_id: int):
+        """Foydalanuvchiga cheksiz obuna berish (2099 yilgacha)."""
+        self._ensure_pool()
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE users SET
+                    is_subscribed = TRUE,
+                    subscription_expires = '2099-12-31'::timestamptz
+                WHERE telegram_id = $1
+                """,
+                telegram_id,
+            )
+
+    async def revoke_unlimited(self, telegram_id: int):
+        """Foydalanuvchidan cheksiz obunani olish."""
+        self._ensure_pool()
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE users SET
+                    is_subscribed = FALSE,
+                    subscription_expires = NULL
+                WHERE telegram_id = $1
+                """,
+                telegram_id,
+            )
+
 
 # Global instance
 db = Database()
