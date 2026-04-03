@@ -6,6 +6,7 @@ Bot ishga tushganda `init_db()` chaqiriladi,
 to'xtashda `close_db()` chaqiriladi.
 """
 import logging
+import os
 import asyncpg
 from config import config
 
@@ -19,13 +20,38 @@ class Database:
         self.pool: asyncpg.Pool | None = None
 
     async def init(self):
-        """Ulanish pool'ini yaratish."""
+        """Ulanish pool'ini yaratish va jadvallarni yaratish."""
         self.pool = await asyncpg.create_pool(
             dsn=config.DATABASE_URL,
             min_size=2,
             max_size=10,
         )
         print("[OK] PostgreSQL ulanish pool yaratildi")
+
+        # Avtomatik jadvallarni yaratish
+        await self._auto_create_tables()
+
+    async def _auto_create_tables(self):
+        """schema.sql ni o'qib jadvallarni yaratish (agar mavjud bo'lmasa)."""
+        schema_path = os.path.join(os.path.dirname(__file__), "schema.sql")
+        if not os.path.exists(schema_path):
+            logger.warning("[SKIP] schema.sql topilmadi")
+            return
+
+        async with self.pool.acquire() as conn:
+            # Jadvallar allaqachon bormi tekshirish
+            exists = await conn.fetchval(
+                "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name='users')"
+            )
+            if exists:
+                logger.info("[OK] Jadvallar allaqachon mavjud")
+                return
+
+            # Schema ni ishga tushirish
+            with open(schema_path, "r", encoding="utf-8") as f:
+                schema = f.read()
+            await conn.execute(schema)
+            logger.info("[OK] Jadvallar muvaffaqiyatli yaratildi (schema.sql)")
 
     async def close(self):
         """Pool'ni yopish."""
